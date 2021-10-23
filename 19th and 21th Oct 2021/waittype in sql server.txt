@@ -1,0 +1,20 @@
+SQL Server Wait Statistics are one of the most important and common performance tuning metrics that can be used to track and troubleshoot query performance by identifying resource bottlenecks the query is waiting for. There are two main categories for the SQL Server Wait Statistics; the Single Wait type, where the query is waiting for CPU resource availability and the Resource Wait type, where the query is waiting for a specific resource availability, such as I/O or Memory resources.
+
+The Wait Statistics information, such as the wait type, the wait duration and the wait count are recorded by the SQL Server Engine to help in tracking performance issues. The wait statistics information about an actively running query can be retrieved by joining different system DMVs such as sys.dm_os_waiting_tasks and sys.dm_os_wait_stats DMVs, in addition to the current state of the running queries. But what if I want to get wait statistics information of a specific query only? And what if I am not able to run both my query and the one querying the wait statistics information concurrently?
+
+wait type:
+ 
+
+ select * from sys.sysprocesses
+
+ select * from sys.dm_os_wait_stats order by wait_type desc
+
+ CXpacket
+ Buffe_latch
+ Async_network_io
+ Log write
+ Lck_S
+ Lck_X
+ lock_U
+
+ select * from emp

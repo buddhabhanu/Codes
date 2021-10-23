@@ -1,0 +1,64 @@
+Parameter Sniffing:
+
+SQL Server uses a process called parameter sniffing when it executes stored procedures that have – you guessed it – parameters. When the procedure is compiled or recompiled, the value passed into the parameter is evaluated and used to create an execution plan.
+
+This Process is one of the way to maintain a seperate execution Plan for your Most expensive queries or Frequently Used queries.
+
+Recompile is the cmd which leads to re-create an execution Plan for every single time for your query or set or queries or store procedure.
+
+But using the recompile on the entire sp is also not good recommendation. Because it creates Execution plan for every execution. 
+
+So for aSpecific Query in the store proc can be mentioned with the cmd "OPTION (OPTIMIZE FOR (value)". So only for such valued parameter only we get a good Execution Plan and remaining cases for the sp you can use the different execution Plan.
+
+-- 
+Example:
+-- This SP creates with a recomplie option only when the parameter gives as id=1 . So for the id=1. It creates a good Execution Plan where the actual rows and expected rows are same number. So it is good to the query to execution faster.
+Create procedure aa (@id int)
+as
+
+begin
+select * from aaa where id=@id
+OPTION (OPTIMIZE FOR (@id=1));
+
+end
+
+-- Here you are creating the same SP but without the recompile option. So for the id= any value it will use this execution Plan. Here it will create the execution Plan once and will reuse the same for n number of times. Untill we drop this Execution Plan. So for the huge data retrive the plan might be the good.  
+create procedure aa_1 (@id int)
+as
+
+begin
+select * from aaa where id=@id
+end
+
+-- Here I created a New SP where it says when the id=1 then it will execute one Sp and will create it's owner execution Plan and for remaining values it will execution different sp with different execution Plan. 
+This is one of the way to get different execution Plan for your require cases. This is called Parameter Sniffing. 
+
+create procedure aa_main (@id int)
+as
+begin
+if (@id=1)
+begin
+exec aa @id
+end
+else
+exec aa_1 @id
+end
+
+-- To execute the sp
+exec aa_main 1
+
+
+-- To drop the exectuion Plan in the buffer cache
+dbcc freeproccache
+Note: DO NOT ever run on the PROD and UAT system. 
+Because it will drop your running sp execution Plan and it will leads to SQL Query Performance.
+
+
+--to Drop the specific Execution Plan
+First we should get the plan Handler ( from sys.dm_exec_requests)
+
+then pass the sql Handler to the 
+dbcc freeproccache(sqlhandler)
+
+This will only remove your specific sp Execution Plan.
+This can be a safe way to do but still make sure wheather the requirment is there are not.

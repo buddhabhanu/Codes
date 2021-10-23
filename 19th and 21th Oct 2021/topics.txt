@@ -1,0 +1,8 @@
+Performance Tuning in SQL Server:
+1. SQL Indexes
+2. Wait types
+3. DML and DMF
+4. Query Execution and Plan
+5. Execution Plans
+6. Parameter Sniffing
+7. Tips to Improve the performance.

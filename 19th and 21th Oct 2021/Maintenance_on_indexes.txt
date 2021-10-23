@@ -1,0 +1,118 @@
+Indexes:
+
+use AdventureWorks2019
+go
+select name,sal from emp where empid=4
+
+create nonclustered index idx on emp(dept_name)
+
+
+
+
+-- To view the user created table Indexes using sys catalogs. 
+select o.name as Table_name,i.object_id as table_id,o.type_desc as table_type,i.name as Index_name,i.index_id,i.type_desc as Index_type,o.create_date
+ from sys.indexes i join  sys.objects o on i.object_id=o.object_id where o.type='U'
+
+ Once the Indexes are created we need to maintain these index with healthy use.
+ So we need to check the fragmentation on the Indexes at regular basics.
+ Note: It is a DB maintainence  Job we should create on all  the DBs in a sql server.
+ Afterwards we should also update the statistics of the DB after a defrag job completes.
+CMD to update the stats of a DB:
+
+
+use AdventureWorks2019
+go
+sp_updatestats
+
+Note: This is optional Just for ur understanding.
+--To update a specific table in a DB
+Update statistics <table name> -- It will update the stats of a table on sample reords.
+--and will not scan entire table.
+
+Update statistics <table name> with fullscan --> It will do a complete Scan on a table
+--and will update their statistics on the records address. 
+
+
+Fragmeantion: Index Fragment is that data will be scatered in the index pages becuase of more 
+DML operation on the Index pages. It will results is free space in the middle of the records
+space. If the scratering continues the performance of the query will be degraded. 
+So we need to defrag the Index pages based upon the threshold on it.
+In sql server, we have different thresholds of fragmenation on Index pages:
+If the fragmentaion is 0- <5% --> No action required.
+ If the fragmentaion is >5% - <30 % --> Index reorgaize is required.
+ If the fragmentaion is >30% --> Index rebuild is required.
+ Note: Also this is applicable for the index which have more than 1000 page count. 
+
+-- Index fragmentaion identification including the index page count in it
+We can either get the details using DBCC or DMF
+
+dbcc showcontig
+or
+select object_name(object_id),* from sys.dm_db_index_physical_stats(5,null,null,null,null)
+ where avg_fragmentation_in_percent>5 ORDER BY avg_fragmentation_in_percent DESC
+
+ select object_name(2099048)
+
+ ONCE THE fragmentation Indentified we can reorg or re-build based on the threshold percentage
+ for the pages more than 1000. 
+
+ Re-org: It is re-arranging the space in the index pages. Whereever we find the free space it will
+ be filled by arranging again the order at leaf level. 
+
+ If in Cluster Index if we re-organize:  The entire B-tree will change the order by filling the 
+ free space at leaf level data/records.
+
+ If in Non-Cluster if we re-organize: It will re-arrange the records and will cover the free space
+ and the address space of the records by re-arranged along with the data/records. 
+ Note: This we happend  because of the More DML operations on the Index pages.
+ And also re-org will take acceptable time to re-arrange as we are doing if the threshold
+  of fragmenation <30. 
+
+  Re-Build: Index Re-build means drop the index and re-create with same index name and with the
+  columns in it. 
+
+  Here again the index page will create according to the type of Index we use.
+  Also rebuild index will be happen only if the fragment % is >30%.
+
+  Command: We can re-og or re-buld either using GUI or Command
+
+  GUI: On a specific Table-> Expand and click on Indexes -> expand and rt click on specific index -> rebuild/ re-organise.
+  Note: we view the Fragmention then view properties in the above navigation. 
+
+  CMD: We can use DBCC or Alter index cmd to perform rebuild or reorganise.
+
+ DBCC indexdefrag --> Used to re-organise the index
+ dbcc indexdefrag 
+(
+    { 'database_name' | database_id | 0 }
+    , { 'table_name' | table_id | 'view_name' | view_id }
+    [ , { 'index_name' | index_id }
+    [ , { partition_number | 0 } ] ]
+)
+   
+DBCC DBreindex --> Used to Index rebuild. 
+dbcc DBreindex 
+(
+    'table_name'
+    , 'index_name'  , fillfactor   )
+
+
+-- Alter CMD to rebuild
+
+ALTER INDEX [PK__my_tab__3213E83F5B063157] ON [dbo].[my_tab] REBUILD 
+
+ALTER INDEX [PK__my_tab__3213E83F5B063157] ON [dbo].[my_tab] REORGANIZE 
+
+-- We can REORGANIZE all the indexes in a table.
+
+ALTER INDEX ALL ON HumanResources.Employee
+REORGANIZE ; 
+
+
+-- We can rebuild all the indexes in a table.
+
+ALTER INDEX ALL ON Production.Product
+REBUILD 
+WITH (FILLFACTOR = 80, SORT_IN_TEMPDB = ON,
+              STATISTICS_NORECOMPUTE = ON);
+GO

@@ -1,0 +1,21 @@
+Hi Team,
+
+I have Listed Few tips which you can follow.
+
+Tips to improve Performance:
+1. Avoid * in the selects
+2. Avoid using more memory consumed data types.
+3.Avoid Using Order by or group by clause.
+4. Try to filter the data at the begining itself but not at the bottom of the query.
+5. Create Indexes( cluster and non-clustered index)
+6. Keep Cluster index on a appropiate coulmns.
+7. mostly used columns should be in non-clustered key.
+8. Drop unused Indexes.
+9. Good to create Indexes on values(int) then character(char\varchar)
+10. Use the key tablockX while inserting.
+11. Use with (nolock) while data retrive.
+12. Use nocount on in reducing the Execution Time and resource consumption.
+13. Use Try and catch block in sp to avoid failures of the sp.
+14. Avoid Cursors as it is line by line execution take the sql performance down. Use it sensability.
+15. Use temp tables much than the table variables.
+16. Try to use MAx DOP count for your queries.

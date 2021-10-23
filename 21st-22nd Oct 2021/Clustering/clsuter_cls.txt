@@ -1,0 +1,58 @@
+
+DNS name
+IP
+
+Node1 Us02dbaud01.abc.audi.com [10.192.15.3]
+Node2 Us02dbaud02.abc.audi.com [10.192.15.5]
+
+Cluster Node Us02clusdb01.abc.audi.com [10.192.15.2]
+SQL Server
+
+To contact windows Team to a SQL Network Name and Assigned IP for it
+Nodes:
+Us02dbaud01.abc.audi.com [10.192.15.3] -> Active
+Us02dbaud02.abc.audi.com [10.192.15.5] -> Passive
+SQL Network Name: 
+WinAudisql01.abc.audi.com [10.192.15.7]
+
+Nodes:
+Node2 Us02dbaud02.abc.audi.com [10.192.15.5] -> Passive
+Node3 Us02dbaud03.abc.audi.com [10.192.15.6] -> Active
+SQL Network Name: 
+WinAudisql02.abc.audi.com [10.192.15.8]
+
+Named Instance: BHANU 
+SQL Server name if used Default Instance: WinAudisql01   1433
+SQL Server name if used Named Instance: WinAudisql01\BHANU    1434
+
+(or)
+WinAudisql01.abc.audi.com,1433
+
+
+
+Steps: 
+1.Contact windows team in gathering the Info of SQL Network Name and IP.
+2. Contact windows team in Gather SQl Service account Name and Password.
+3. Contact windows team in Gather the Cluster Disks.
+4. Contact Windows and ask to grant "Create Computer Object" Permissions on the Windows Nodes(01 and 02).
+Note: If this Permission is not there for you. you cannot successfully Install the SQL Server Cluster. Again you need uninstall the SQL and Windows Need to remove the SQL Network name from AD and
+again you should continue the Install . It is a time waste task. So please make sure you have "create computer object" permission on windows nodes. So that you can create SQL Network name with IP.
+
+4. Install SQL Server failover Cluster.
+Satrt Instaaltion with option"SQL Server failover Instaaltion"
+
+Note: This will be your Active SQL Installation.
+Note: you Have to Install the Instance features and Shared Features on C Drive ONLY*******
+DO NOT Install your SQL Binaries on Other Drives.
+BUT you can Install System database and Error log on other Cluster Disks.i.e., D , E ,F etc
+
+5. On Node2, inorder to have a Failover functionality.
+We have to Install SQL with "Add Node to SQL Server failover cluster"
+Completed the Installation.
+
+to View the SQL Server cluster details after Installation.
+you have a Place to verify or check.
+it is "Failover cluster Manager".
+
+
+
