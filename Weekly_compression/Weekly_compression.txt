@@ -1,0 +1,69 @@
+/* Compress & Shrink Files for the last week for all the 2014 large dbs */
+
+
+DECLARE @refDate DATE, @dbName SYSNAME, @SQL VARCHAR(200), @TableName SYSNAME, 
+@PartitionNum INT, @SQLCMD NVARCHAR(1000), @StartDate DATE, @EndDate DATE,
+@FileGroup VARCHAR(100)
+
+--SET @StartDate = CONVERT(VARCHAR, DATEADD(DD, -17, GETDATE()), 101)
+SET @StartDate = CONVERT(VARCHAR, DATEADD(wk, -1, GETDATE()), 101)
+SET @EndDate = CONVERT(VARCHAR, GETDATE(), 101)
+
+DECLARE dbName CURSOR STATIC FOR
+SELECT name FROM sys.databases WHERE name LIKE '%2020' ORDER BY name DESC
+
+OPEN dbName
+FETCH NEXT FROM dbName INTO @dbName
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+
+DECLARE RefDate CURSOR STATIC FOR
+SELECT CONVERT(VARCHAR, TradeDate, 101) FROM dbADMIN..tTradeDate
+WHERE TradeDate BETWEEN @StartDate AND @EndDate
+
+OPEN RefDate
+FETCH NEXT FROM RefDate INTO @refDate
+WHILE @@FETCH_STATUS = 0
+BEGIN
+
+	SET @SQLCMD = N'USE ' + @dbName + '; SELECT @PartitionNum = $PARTITION.pDatePFN(''' + CONVERT(VARCHAR,@refDate) + ''')'
+	PRINT @SQLCMD
+	EXECUTE sp_executesql @SQLCMD, N'@PartitionNum int OUT',@PartitionNum OUT
+	
+
+	DECLARE C2 CURSOR STATIC FOR
+	SELECT TableName FROM dbADMIN..tCompressTableList WHERE dbName = @dbName ORDER BY TableName
+
+	OPEN C2
+	FETCH NEXT FROM C2 INTO @TableName
+
+	WHILE @@FETCH_STATUS = 0
+	BEGIN
+
+		SET @SQL = 'USE ' + @dbName + '; ALTER INDEX ALL ON ' + @TableName + ' REBUILD PARTITION = ' + CONVERT(VARCHAR, @PartitionNum) + ' WITH (DATA_COMPRESSION = PAGE)'
+		PRINT @SQL
+		EXEC(@SQL)
+	
+	FETCH NEXT FROM C2 INTO @TableName
+	END
+	CLOSE C2
+	DEALLOCATE C2
+
+	SET @FileGroup = @dbName + '_' + CONVERT(VARCHAR,@refDate,112)
+
+	--SET @SQL = 'EXEC dbADMIN..usp_ShrinkDataFile '  + '''' + @dbName + '''' + ',' + '''pDatePFN''' + ',' + '''' + @FileGroup + ''''
+	--PRINT @SQL
+	--EXEC(@SQL)
+
+FETCH NEXT FROM RefDate INTO @refDate
+END
+
+CLOSE RefDate
+DEALLOCATE RefDate
+
+FETCH NEXT FROM dbName INTO @dbName
+END
+
+CLOSE dbName
+DEALLOCATE dbName

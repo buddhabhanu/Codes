@@ -1,0 +1,58 @@
+
+CREATE PROCEDURE [dbo].[usp_ShrinkDataFile] @dbname VARCHAR(35), @prtnfuncname SYSNAME,@FileGroup VARCHAR(50)
+AS
+
+/* EXEC usp_ShrinkDataFile 'dbPoem2013','pDatePFN','dbPoem2013_20130401' */
+
+BEGIN
+	DECLARE @SQL VARCHAR(MAX),
+			@filename SYSNAME,
+			@str VARCHAR(500)
+
+	IF OBJECT_ID('tempdb..#tmpShrinkFileList') IS NOT NULL
+	DROP TABLE #tmpShrinkFileList
+	
+	CREATE TABLE #tmpShrinkFileList ([FileName] SYSNAME)
+
+	SELECT @SQL = 'INSERT INTO #tmpShrinkFileList 
+	SELECT df.name AS [FileName]	
+	FROM ' + @dbname + '.sys.partition_functions pfn INNER JOIN ' + @dbname + '.sys.partition_schemes psch
+	ON pfn.function_id = psch.function_id
+	INNER JOIN ' + @dbname + '.sys.partition_range_values prv
+	ON pfn.function_id = prv.function_id
+	AND pfn.name = ''' + @prtnfuncname + '''
+	INNER JOIN ' + @dbname + '.sys.destination_data_spaces dds
+	ON prv.boundary_id = dds.destination_id
+	AND psch.data_space_id = dds.partition_scheme_id
+	INNER JOIN ' + @dbname + '.sys.filegroups fg
+	ON fg.data_space_id = dds.data_space_id
+	AND fg.name = ''' + @FileGroup + '''
+	INNER JOIN ' + @dbname + '.sys.database_files df
+	ON fg.data_space_id = df.data_space_id'
+	--PRINT @SQL
+	EXEC (@SQL)
+
+	DECLARE curFileList CURSOR FOR
+	SELECT [FileName] FROM #tmpShrinkFileList
+	
+	OPEN curFileList	
+	FETCH NEXT FROM curFileList INTO @filename
+	
+	WHILE @@FETCH_STATUS = 0
+	BEGIN
+	
+		SELECT @str = 'USE ' + @dbname + ' ;DBCC SHRINKFILE(' + @filename + ',1)WITH NO_INFOMSGS'
+		PRINT @str		
+		EXEC (@str)
+	
+	FETCH NEXT FROM curFileList INTO @filename
+	END
+	
+	CLOSE curFileList
+	DEALLOCATE curFileList
+
+	IF OBJECT_ID('tempdb..#tmpShrinkFileList') IS NOT NULL
+	DROP TABLE #tmpShrinkFileList
+	
+END
+
