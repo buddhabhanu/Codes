@@ -1,0 +1,48 @@
+
+--This cmdlet helps you to connect to the Azure subsciption which is first in the list.
+Note: a POPUP will be opened to authenticate.
+cmd: connect-azaccount
+
+-- To subscript to Different Subscription in Azure.
+cmd: Set-AzContext -Subscription "AG_EMEA_PPE_01"
+
+-- Also we have a requirment to get the VM details.
+So thing is First we have to add the Subscription and then we need to gather the info of the VM by using Resource Group and Vm details
+
+Set-AzContext -Subscription "AG_EMEA_PPE_01"
+$vmSize = Get-AzVM -ResourceGroupName seed-a4edb-dev -Name PHAZD0952DB01
+$vmSize.HardwareProfile.VmSize
+
+
+---------------------------------------------
+
+
+[Yesterday 11:28 AM] Vajrala, Jay
+    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+​[Yesterday 11:28 AM] Vajrala, Jay
+    Install-Module -Name Az -Scope CurrentUser -Repository PSGallery -Force
+​[Yesterday 11:44 AM] Vajrala, Jay
+    Install-Module -Name SqlServer -AllowClobber
+​[Yesterday 11:48 AM] Vajrala, Jay
+    
+
+Install-Module dbatools -Scope CurrentUser
+
+
+​[Yesterday 11:56 AM] Vajrala, Jay
+    Set-AzContext -Subscription "AG_EMEA_PPE_01"
+​[Yesterday 11:56 AM] Vajrala, Jay
+    $vmSize = Get-AzVM -ResourceGroupName seed-a4edb-dev -Name PHAZD0952DB01
+$vmSize.HardwareProfile.VmSize
+​[Yesterday 12:44 PM] Vajrala, Jay
+    sapurji palam ji group
+
+
+Shift Timing ?
+Asking to come to Office ?
+
+
+
+
+
+

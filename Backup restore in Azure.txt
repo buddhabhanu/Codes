@@ -1,0 +1,32 @@
+On Source Server
+
+BACKUP LOG [PD5] TO URL = 'https://phazp0701sqlbackups.blob.core.windows.net/sqlbackups/LOGSHIPPING/PHAZP0701DB09/TLOG/PD5.trn' WITH INIT, FORMAT, COMPRESSION
+
+osql -S "10.226.48.39,1433" -U LogshippingLogin -P $undayFunday -Q"exec msdb.dbo.sp_start_job 'LogShipping - LOG Restore - Primary'"
+
+
+osql -S "10.231.72.39,1433" -U LogshippingLogin -P $undayFunday -Q"exec msdb.dbo.sp_start_job 'LogShipping - LOG Restore - DR'"
+
+
+On Target server Primary
+
+Azure copy Step
+
+C:\azcopy\azcopy.exe copy "https://phazp0701sqlbackups.blob.core.windows.net/sqlbackups/LOGSHIPPING/PHAZP0701DB09/TLOG/PD5.trn?sv=2019-02-02&sr=c&si=sqlbackupsPolicy&sig=dAxMUCOo5038RnR%2FffrxgtGL6OpXsBIlHphSnCF%2FA8Y%3D" "F:\Backup" --recursive=true
+
+-- Restore on the server
+
+RESTORE LOG [PD5] FROM DISK = 'F:\Backup\PD5.trn' WITH FILE = 1, NORECOVERY
+
+
+-- Log backup restore secondary
+
+osql -S "10.226.48.41,1433" -U LogshippingLogin -P $undayFunday -Q"exec msdb.dbo.sp_start_job 'LogShipping - LOG Restore - Secondary'"
+
+-- Move the trn files to Archieve
+
+F:\Scripts\MoveBackupsToArchiveFolder.bat
+
+
+
+

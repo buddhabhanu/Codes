@@ -1,0 +1,36 @@
+
+-- Finds Differences in values and dispays the  Target server values
+-- Run this on Source server.
+sp_configure 'Ad Hoc Distributed Queries',1
+go
+reconfigure
+go
+
+select a.* from openrowset('SQLNCLI', 'Server=CPMPPDBSQL4\CPMPPDBSQL4;Trusted_Connection=yes;', 'select name,value_in_use from sys.configurations where name not in(''Ad Hoc Distributed Queries'',''max server memory (MB)'',''min server memory (MB)'')') as a
+except
+select name,value_in_use from sys.configurations where name not in('Ad Hoc Distributed Queries','max server memory (MB)','min server memory (MB)')
+go
+sp_configure 'Ad Hoc Distributed Queries',0
+go
+reconfigure
+----------------------------------------------------------------------------------------
+
+-- Finds Differences in values and dispays the  Target server values
+sp_configure 'Ad Hoc Distributed Queries',1
+go
+reconfigure
+go
+
+select a.* from openrowset('SQLNCLI', 'Server=PHAZP0471DB04,1600;Trusted_Connection=yes;', 'select name from sys.syslogins where name <>''sa'' and name not like ''##%'' and name not like ''NT SERVICE%''') as a
+except
+select name from sys.syslogins where name <>'sa' and name not like '##%' and name not like 'NT SERVICE%'
+go
+sp_configure 'Ad Hoc Distributed Queries',0
+go
+reconfigure
+
+
+select name,* from sys.syslogins where name <>'sa'
+and name not like '##%' and name not like 'NT SERVICE%'
+
+-------------------------------------------------------------------------------------

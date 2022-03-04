@@ -1,0 +1,96 @@
+set nocount on
+
+-- Database Lisr
+select @@servername,@@SERVICENAME,name from sys.databases where database_id>4 and state_desc='ONLINE' and name <>'AuditDB' 
+order by name
+
+DECLARE @User_query varchar(1000) 
+-- It will Pull ONLY windows Users on Every Database
+SELECT @User_query = 'IF ''?'' NOT IN(''master'', ''model'', ''msdb'', ''tempdb'') BEGIN USE ? 
+   select name as User_Name ,db_name() as DB_Name ,case isntname when 1 then ''Win_user''
+   When 0 then ''DB_Created_User''END as User_type, 
+   case isntgroup when 1 then ''Group_usr''
+   When 0 then ''NA'' END as Group_type,
+   case isntuser when 1 then ''windows_user''
+   When 0 then ''NA'' END as Windows_Auth,
+   case issqluser when 1 then ''SQL_user''
+   When 0 then ''NA'' END as SQL_Auth from sys.sysusers where hasdbaccess=1
+   and name <> ''dbo'' and issqluser =0 and name not in (''NT AUTHORITY\SYSTEM'') order by name
+   End' 
+
+ BEGIN
+	BEGIN TRY
+   EXEC sp_MSforeachdb @User_query 
+END TRY
+BEGIN CATCH
+   SELECT ERROR_MESSAGE() AS [Error Message]
+    /*     ,ERROR_LINE() AS ErrorLine
+         ,ERROR_NUMBER() AS [Error Number]  
+         ,ERROR_SEVERITY() AS [Error Severity]  
+         ,ERROR_STATE() AS [Error State] */
+          
+END CATCH;
+End
+
+-- To pull all the user created Windows Logins on the server
+Select name as Login_name,dbname as DB_context,
+case isntname when 1 then 'NT_Login'
+   When 0 then 'SQL_Login'END as Login_type, 
+   case isntgroup when 1 then 'Group_Login'
+   When 0 then 'NA'END as Group_type
+   from sys.syslogins where name not like '%##%' and name not like '%NT%'
+and name <> 'sa' and isntname=1
+
+--xp_logininfo 'WIN-CMN9PDTCQ46\Administrator','all'
+-- To Pull only the Group members and if any deleted group in AD still it will avoid and will get for available Groups only.
+IF OBJECT_ID('tempdb..#Temp_tab') IS NOT NULL 
+begin
+DROP TABLE #Temp_tab
+end
+
+create table #Temp_tab ( Login_Name varchar(500),DB_context varchar(100),Login_type varchar(100),
+Group_type varchar(200))
+
+Insert Into #Temp_tab (Login_Name,DB_context,Login_type,Group_type)
+ select name,dbname,
+case isntname when 1 then 'NT_Login'
+   When 0 then 'SQL_Login'END as Login_type, 
+   case isntgroup when 1 then 'Group_Login'
+   When 0 then 'NA'END as Group_type
+   from sys.syslogins where name not like '%##%' and name not like '%NT%'
+and name <> 'sa'
+
+--select * from #Temp_tab
+-- Pull the Group account and with thier Members in it.
+DECLARE @groupname VARCHAR(MAX);
+    
+DECLARE cursor_test CURSOR
+FOR select Login_name from #Temp_tab where Login_type='NT_Login' and Group_type='Group_Login'
+
+OPEN cursor_test
+
+FETCH NEXT FROM cursor_test INTO 
+    @groupname
+
+WHILE @@FETCH_STATUS = 0
+    BEGIN
+	BEGIN TRY
+   Exec master..xp_logininfo @groupname  ,'members'
+        FETCH NEXT FROM cursor_test INTO 
+            @groupname;
+END TRY
+BEGIN CATCH
+   SELECT ERROR_MESSAGE() AS [Error Message]
+    /*     ,ERROR_LINE() AS ErrorLine
+         ,ERROR_NUMBER() AS [Error Number]  
+         ,ERROR_SEVERITY() AS [Error Severity]  
+         ,ERROR_STATE() AS [Error State] */
+         FETCH NEXT FROM cursor_test INTO 
+            @groupname; 
+END CATCH
+	
+    END
+
+CLOSE cursor_test
+
+DEALLOCATE cursor_test;

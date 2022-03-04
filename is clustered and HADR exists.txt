@@ -1,0 +1,19 @@
+declare @IsClustered as sql_variant
+declare @IsHadrEnabled as sql_variant
+set @IsClustered = (select SERVERPROPERTY('IsClustered'))
+set @IsHadrEnabled=(SELECT SERVERPROPERTY ('IsHadrEnabled'))
+select @IsClustered as IsClustered ,
+case @IsClustered
+when 0 then 'Not Clustered'
+when 1 then 'Clustered'
+else 'Invalid Input'
+end as 'IsClustered Status'
+
+
+
+select @IsHadrEnabled as 'Always-on' ,
+case @IsHadrEnabled
+when 0 then 'Always-on Disabled'
+when 1 then 'Always-on Enabled'
+else 'Invalid Input'
+end as 'Always-on Status'

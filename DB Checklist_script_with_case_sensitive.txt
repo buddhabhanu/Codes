@@ -1,0 +1,1242 @@
+
+/****************************************************************************/ 
+--IF EXISTS ( SELECT	1 FROM	master..SYSOBJECTS WHERE	name = 'usp_DBcheckList_report' AND TYPE = 'P')
+--BEGIN
+--    DROP PROCEDURE [dbo].[usp_DBcheckList_report];
+--END
+--GO
+Alter PROCEDURE [dbo].[usp_DBcheckList_report](  
+ 
+  @Server VARCHAR(100) = NULL)  
+WITH ENCRYPTION
+AS
+BEGIN  
+SET NOCOUNT ON;  
+SET ARITHABORT ON;  
+  
+DECLARE @SERVERNAME VARCHAR(100);  
+SET @SERVERNAME = ISNULL(@Server,@@SERVERNAME);  
+  
+
+/****************** Server Reboot Details ********************/  
+
+  
+CREATE TABLE #RebootDetails                                
+(                                
+ LastRebooted datetime,                                
+ CurrentDate datetime,                                
+ UpTimeInDays varchar(100)                          
+)                        
+Insert into #RebootDetails          
+SELECT sqlserver_start_time 'Last ReBooted',GetDate() 'Current Date', DATEDIFF(DD,sqlserver_start_time,GETDATE())'Up Time in Days'  
+FROM sys.dm_os_sys_info;  
+
+  /*******************Service account Details *************************/
+  
+
+CREATE TABLE #Serviceaccount                                
+(                                
+ Servicename Varchar(400),                                
+ startup_type varchar(100),                                
+ status varchar(100) ,
+ Service_Account varchar(100)                      
+)                        
+Insert into #Serviceaccount          
+select Servicename,startup_type_desc,status_desc,service_account from sys.dm_server_services
+
+--select * from #Serviceaccount
+
+
+/****************** SA Status Details *****************/  
+
+CREATE TABLE #SAStatus                                
+(                                
+ Login  varchar(50),                                
+ Status  varchar(50),                                
+                                
+)    
+insert into #SAStatus  
+SELECT Name as [Login Name], (case when (is_disabled=1) Then 'Disabled' when (is_disabled=1) Then 'Enabled' end )as [Status] FROM sys.server_principals where name ='sa'
+--select * from #SAStatus  
+
+/****************** sysconfiguration Details *****************/  
+
+CREATE TABLE #Configstatus                                
+(                                
+ [Configuration Name]  varchar(50),                                
+ Status  varchar(50),                                
+                                
+)    
+insert into #Configstatus  
+select name as [Configuration Name],(case when (value_in_use=0) Then 'Disabled' when (value_in_use=1) Then 'Enabled' end )as [Status] from sys.configurations where name in('xp_cmdshell', 'Ad Hoc Distributed Queries')
+--select * from #Configstatus 
+
+
+/****************** Memory and CPU Details *****************/  
+
+
+CREATE TABLE #MemoryDetails                                
+(                                
+ [Total_Memory_in_GB]  varchar(50),                                
+ CPU_Count  varchar(10),                                
+                                
+)    
+insert into #MemoryDetails  
+select (physical_memory_kb/1024/1024) as Total_Memory_in_GB,cpu_count  from sys.dm_os_sys_info
+--select * from #MemoryDetails 
+
+
+/****************** Server Memory Configuration Details *****************/  
+
+
+CREATE TABLE #ServerMemory                              
+(      
+Instance_Name varchar(50),
+ Name  varchar(100),                                
+  Value varchar(10)                               
+                                
+)    
+insert into #ServerMemory
+select @@servicename as Instance_Name,name,convert(varchar(100),value_in_use)  from sys.configurations where name like '%server memory%'
+--select * from #ServerMemory 
+
+
+/****************** DB compatibility and DB Collation Details *****************/  
+
+
+CREATE TABLE #Compatibility                             
+(      
+SQL_Version varchar(500),
+DB_Name varchar(100),                               
+ compatibility_level tinyint,
+ DB_Collation_Name varchar(100)
+                                
+)    
+insert into #Compatibility
+select left(@@version, LEN(@@version) - 158) as SQL_version,Name as DB_name,compatibility_level,collation_name as DB_Collation_Name from sys.databases where database_id>4
+--select * from #compatibility
+
+/******************Server Collation Details *****************/  
+
+CREATE TABLE #Collation                            
+(      
+Server_Collation varchar(500)
+                               
+)    
+insert into #Collation
+select convert(varchar(100),serverproperty('collation')) as server_Collation
+
+/****************** DB Owner without SA Details *****************/  
+
+
+CREATE TABLE #DBowner                           
+(      
+DB_Name varchar(100),                               
+Associated_DBOwner  varchar(100)                              
+)    
+insert into #DBowner
+-- DB name with other than sa owner
+select d.name as DB_Name,p.name as Associated_DBOwner from sys.databases d  join sys.server_principals p on d.owner_sid=p.sid where d.owner_sid   not in (0x01)
+--drop table #DBowner
+
+
+/****************** Other Logins with Admin Access Details *****************/  
+
+
+CREATE TABLE #Logins_Admin_Rights                        
+(      
+Login_Name varchar(100),                               
+SA_Rights  varchar(100)                              
+)    
+insert into #Logins_Admin_Rights
+select name as Login_Name,
+(case when (sysadmin=1) Then 'Enabled' when (sysadmin=0) Then 'Disabled' end )as [SA_Rights]
+ from sys.syslogins where sysadmin=1 and name<>'sa' and name not like '%Service%' and  name not like '%svc%' and name not like '%DBA%'
+--select * from #Logins_Admin_Rights
+
+
+/****************** Individual Windows Logins Details *****************/  
+
+
+CREATE TABLE #Individual_win_login                       
+(      
+Login_Name varchar(100)                                           
+)    
+insert into #Individual_win_login    
+select name as AD_Login_Name  from sys.syslogins where name not like '%svc%' and name<>'sa' and name not like '%##%' and name not like '%NT%' and name not in(select name from sys.sql_logins) and isntgroup=0
+
+
+/****************** Replication DB List Details *****************/  
+
+
+CREATE TABLE #Replication_DB                       
+(      
+DB_Name varchar(100)                                           
+)    
+insert into #Replication_DB   
+SELECT Name as DBname FROM sys.databases WHERE is_distributor = 1 or is_published=1 or is_subscribed=1
+
+
+/****************** Replication Job Details *****************/  
+
+CREATE TABLE #Replication_job              
+(      
+Job_Name varchar(100),                               
+Job_Owner  varchar(100)                              
+)    
+insert into #Replication_job
+-- Replication jobs and their job owner login, it should be on sa only.
+select j.name as Replication_Job_Name,p.name as Replication_Job_owner_name from msdb..sysjobs j join sys.server_principals p on j.owner_sid=p.sid where j.name like '%repl%'
+
+/****************** SQL Job with Non SA Login Details *****************/  
+
+Create Table #Jobname ([Job Name] varchar(200),[Owner Name] varchar(100))
+Insert into #Jobname 
+select name ,suser_sname(owner_sid)  from  msdb..sysjobs where owner_sid <>0x01
+
+
+/*******************Mirror EndPoints with Principal Owner Details****************************************/
+
+Create Table #Mirror ([Principal Name] varchar(200),[EndPoint Name] varchar(100),[Protocol Name] varchar(100),Status varchar(100))
+Insert into #Mirror 
+SELECT  sp.name as [Principal Name], me.name as [EndPoint Name],me.type_desc as [Protocol Name],me.state_desc as Status
+FROM sys.database_mirroring_endpoints me with(nolock)
+inner join sys.server_principals sp with(nolock)
+on me.principal_id = sp.principal_id
+  
+/***********************************************************/  
+/************* Windows Disk Space Details ******************/  
+/***********************************************************/  
+
+CREATE TABLE #FreeSpace (DName CHAR(1), Free_MB BIGINT, Free_GB DECIMAL(16,2))
+INSERT INTO #FreeSpace (DName,Free_MB) EXEC xp_fixeddrives;
+UPDATE #FreeSpace SET Free_GB = CAST(Free_MB / 1024.00 AS DECIMAL(16,2));  
+  
+/************* Authentication Mode Details ******************/  
+
+create table #Mode ([Authentication Mode] nvarchar(500))
+insert into #Mode
+SELECT CASE SERVERPROPERTY('IsIntegratedSecurityOnly')   
+WHEN 1 THEN 'Windows Authentication'   
+WHEN 0 THEN 'Windows and SQL Server Authentication'  
+END as [Authentication Mode]  
+
+/************* Backup Compression Details ******************/  
+
+Create Table #Backup ([Configuration Name] varchar(200),Description varchar(300),Status varchar(10))
+Insert into #Backup 
+select name as Configuration_Name ,[Description],
+case value_in_use
+when 1 then 'TRUE'
+When 0 Then'FALSE' end as Status from sys.configurations where name like '%backup%'
+
+
+/*****************DBA Related Jobs List **********************************/
+
+Create Table #DBAJobs([Job Name] varchar(1000),[Date Created] date,[Last RunDate] bigint,Enabled varchar(100),CATEGORY_NAME nvarchar(100))
+Insert into #DBAJobs
+SELECT   t1.name AS 'JOB_NAME', CONVERT(varchar,t1.date_created, 110) AS 'DATE_CREATED', 
+   CONVERT(varchar,t2.last_run_date, 110) AS 'LAST_RUN_DATE',
+   ENABLED = 
+   CASE t1.enabled 
+   WHEN 1  THEN 'ENABLED'
+   WHEN 0 THEN 'DISABLED' 
+   END, 
+   t3.name AS 'CATEGORY_NAME'
+   FROM msdb.dbo.sysjobs t1 with (NOLOCK) 
+   JOIN msdb..sysjobservers t2 with (NOLOCK) ON t1.job_id = t2.job_id 
+   JOIN msdb..syscategories t3 with (NOLOCK) ON t1.category_id = t3.category_id
+   WHERE t1.name  LIKE '%DBA%' OR t1.name like '%index%' OR t1.name like '%update%' OR t1.name like '%stats%' OR t1.name like '%backup%'
+   OR t1.name like '%restore%' OR t1.name like '%copy%' OR t1.name like '%utilization%' OR t1.name like '%BLOCKING%'
+   OR t1.name like '%SYSADMIN%' OR t1.name like '%WAITSTATS%' OR t1.name like '%SHARED%'
+   OR t1.name like '%Always%' OR t1.name like '%maintenance%' OR t1.name like '%mirror%' OR t1.name like '%Logshipping%'
+   order by t1.name 
+
+   /******************** Trigger Details********************/
+
+   Create table #Trigger(TriggerName varchar(100),Status Varchar(100),Create_Date date,Modify_Date Date)
+Insert into #Trigger
+   SELECT name AS 'TRIGGER_NAME', ENABLED = 
+   CASE is_disabled
+   WHEN 0  THEN 'ENABLED'
+   WHEN 1 THEN 'DISABLED' 
+   END, create_date, modify_date
+FROM sys.server_triggers 
+
+/****************** tempdb File Info *************************/  
+
+-- tempdb file usage  
+Create table #tempdbfileusage( 
+filename varchar(100),               
+servername varchar(100),                           
+databasename varchar(100),                                              
+physicalName varchar(100),                           
+filesizeMB varchar(100),                           
+availableSpaceMB varchar(100),                           
+percentfull varchar(100),
+AutoGrow nvarchar(100)   
+)  
+
+DECLARE @tempdbSQL NVARCHAR(4000);  
+SET @tempdbSQL = ' USE tempdb;  
+SELECT  distinct(mf.name),CONVERT(VARCHAR(100), @@SERVERNAME) AS [server_name]  
+                ,db.name AS [database_name]    
+                ,mf.[filename] AS[file_physical_name]  
+                ,convert(FLOAT, mf.[size]/128) AS [file_size_mb]               
+                ,convert(FLOAT, (mf.[size]/128 - (CAST(FILEPROPERTY(mf.[name], ''SpaceUsed'') 
+
+AS int)/128))) as [available_space_mb]  
+                ,convert(DECIMAL(38,2), (CAST(FILEPROPERTY(mf.[name], ''SpaceUsed'') AS 
+int)/128.0)/(mf.[size]/128.0))*100 as [percent_full],      
+[AutoGrow] = ''By '' + CASE A.is_percent_growth WHEN 0 THEN CAST(A.growth/128 AS VARCHAR(10)) + '' MB -''
+        WHEN 1 THEN CAST(A.growth AS VARCHAR(10)) + ''% -'' ELSE '''' END 
+        + CASE A.max_size WHEN 0 THEN ''DISABLED'' WHEN -1 THEN '' Unrestricted'' 
+            ELSE '' Restricted to '' + CAST(A.max_size/(128*1024) AS VARCHAR(10)) + '' GB'' END 
+        + CASE A.is_percent_growth WHEN 1 THEN '' [autogrowth by percent, BAD setting!]'' ELSE '''' END  
+FROM   tempdb.dbo.sysfiles mf  
+JOIN      master..sysdatabases db  
+ON         db.dbid = db_id()
+cross apply sys.database_files A';  
+--PRINT @tempdbSQL;  
+insert into #tempdbfileusage  
+EXEC sp_executesql @tempdbSQL; 
+
+  /***************** System File Info *************************/  
+
+  Create table #systemfiledetails(                                        
+databasename varchar(100),                           
+filename varchar(100),                           
+physicalName varchar(100),                           
+FILESIZE_MB varchar(100),                           
+AutoGrow nvarchar(100)                           
+)   
+Insert into #systemfiledetails
+select db_name(database_id) as Database_Name,Name as File_Name,physical_name,
+ [FILESIZE_MB] = CONVERT(DECIMAL(10,2),SIZE/128.0)
+    ,[AutoGrow] = 'By ' + CASE is_percent_growth WHEN 0 THEN CAST(growth/128 AS VARCHAR(100)) + ' MB -' 
+        WHEN 1 THEN CAST(growth AS VARCHAR(100)) + '% -' ELSE '' END 
+        + CASE max_size WHEN 0 THEN 'DISABLED' WHEN -1 THEN ' Unrestricted' 
+            ELSE ' Restricted to ' + CAST(max_size/(128*1024) AS VARCHAR(100)) + ' GB' END 
+        + CASE is_percent_growth WHEN 1 THEN ' [autogrowth by percent, BAD setting!]' ELSE '' END
+from sys.master_files where database_id in (1,3,4)
+
+--select * from #systemfiledetails
+
+
+/****************** HTML Preparation *************************/  
+
+  
+DECLARE @TableHTML  VARCHAR(MAX),                                    
+  @strSubject VARCHAR(100),                                    
+  @OriServer VARCHAR(100),                                
+  @version VARCHAR(250),                                
+  @Edition VARCHAR(100),                                
+  @ISClustered VARCHAR(100),                                
+  @SP VARCHAR(100),                                
+  @ServerCollation VARCHAR(100),                                                                
+  @LicenseType VARCHAR(100),                                
+  @Cnt int,           
+  @URL varchar(1000),                                
+  @Str varchar(1000),                                
+  @NoofCriErrors varchar(300)       
+  
+-- Variable Assignment              
+  
+SELECT @version = @@version                                
+SELECT @Edition = CONVERT(VARCHAR(100), serverproperty('Edition'))                            
+
+    
+SET @Cnt = 0                                
+IF serverproperty('IsClustered') = 0                                 
+BEGIN                                
+ SELECT @ISClustered = 'No'                                
+END                                
+ELSE        
+BEGIN                                
+ SELECT @ISClustered = 'YES'                                
+END                                
+SELECT @SP = CONVERT(VARCHAR(100), SERVERPROPERTY ('productlevel'))                           
+
+     
+SELECT @ServerCollation = CONVERT(VARCHAR(100), SERVERPROPERTY ('Collation'))                 
+
+                
+SELECT @LicenseType = CONVERT(VARCHAR(100), SERVERPROPERTY ('LicenseType'))                   
+
+              
+                             
+SELECT @OriServer = CONVERT(VARCHAR(50), SERVERPROPERTY('servername'))                        
+
+Declare @compatable nvarchar(100)
+Declare @compatable1 nvarchar(100)
+select @compatable= convert(nvarchar(100),SERVERPROPERTY('ProductVersion'))
+select @compatable1=SUBSTRING(@compatable,1,2)
+
+
+SELECT @strSubject = 'SQL Server Installation & Configuration Check List ('+ CONVERT(VARCHAR(100), @SERVERNAME) + ')'  
+
+set nocount on
+DECLARE @test varchar(200), @key varchar(100)
+if charindex('\',@@servername,0) <>0
+begin
+set @key = 'SOFTWARE\MICROSOFT\Microsoft SQL Server\'
++@@servicename+'\MSSQLServer\Supersocketnetlib\TCP'
+end
+else
+begin
+set @key = 'SOFTWARE\MICROSOFT\MSSQLServer\MSSQLServer\Supersocketnetlib\TCP'
+end
+
+Declare @port varchar(100)
+EXEC master..xp_regread @rootkey='HKEY_LOCAL_MACHINE',
+@key=@key,@value_name='Tcpport',@value=@test OUTPUT
+SELECT @port=+convert(varchar(10),@test) 
+   
+  
+SET @TableHTML =''  
+SET @TableHTML = @TableHTML +                                     
+ '<div><img align="right" src="Images/Logo_Image.jpg" style="height: 50px; width: 50px"/><font face="Verdana" size="4" color="#3399ff"><H2><bold>SQL Server Installation & Configuration Check Report</bold></H2></font></div>                                  
+ <table border="1" cellpadding="0" cellspacing="0" style="border-collapse: collapse" bordercolor="#111111" width="47%" id="AutoNumber1" height="50">                               
+  
+ <tr>                                  
+ <td width="39%" height="22" bgcolor="#000080"><b>                           
+ <font face="Verdana" size="2" color="#FFFFFF">Server Name</font></b></td>  
+ 
+  <td width="39%" height="22" bgcolor="#000080"><b>                           
+ <font face="Verdana" size="2" color="#FFFFFF">Port Number</font></b></td>   
+ </tr>                                  
+ <tr>                                  
+ <td width="39%" height="22"><font face="Verdana" size="2">' + @SERVERNAME +'</font></td>
+ <td width="39%" height="22"><font face="Verdana" size="2">' + @port +'</font></td>
+ </tr>                                  
+ </table>   
+ 
+
+ <p style="margin-top: 1; margin-bottom: 0">&nbsp;</p>                                  
+ <font face="Verdana" size="4" color="#3399ff"><H3><bold>SQL Server Version Details</bold></H3></font>                                  
+ <table style="BORDER-COLLAPSE: collapse" borderColor="#111111" cellPadding="0" width="47%" 
+
+
+ 
+
+ <table id="AutoNumber1" style="BORDER-COLLAPSE: collapse" borderColor="#111111" height="40" cellSpacing="0" cellPadding="0" width="933" border="2">                                
+ <tr>                                
+ <td align="Center" width="50%" bgColor="#000080" height="15"><b>                               
+ <font face="Verdana" color="#ffffff" size="1">Version</font></b></td>                               
+ 
+ <td align="Center" width="35%" bgColor="#000080" height="15"><b>                               
+ <font face="Verdana" color="#ffffff" size="1">Edition</font></b></td>                        
+      
+ <td align="Center" width="17%" bgColor="#000080" height="15"><b>                               
+ <font face="Verdana" color="#ffffff" size="1">Service Pack</font></b></td>                   
+           
+ <td align="Center" width="60%" bgColor="#000080" height="15"><b>                              
+ <font face="Verdana" color="#ffffff" size="1">Collation</font></b></td>                      
+          
+ <td align="Center" width="93%" bgColor="#000080" height="15"><b>                             
+ <font face="Verdana" color="#ffffff" size="1">LicenseType</font></b></td>                                      
+        
+ <td align="Center" width="93%" bgColor="#000080" height="15"><b>                              
+ <font face="Verdana" color="#ffffff" size="1">Clustered</font></b></td>                      
+
+          
+ </tr>                                
+ <tr>                                
+ <td align="Center" width="50%" height="27"><font face="Verdana" size="1">'+@version +'</font></td>                                
+ <td align="Center" width="17%" height="27"><font face="Verdana" size="1">'+@Edition +'</font></td>                                
+ <td align="Center" width="18%" height="27"><font face="Verdana" size="1">'+@SP +'</font></td> 
+ <td align="Center" width="17%" height="27"><font face="Verdana" size="1">'+@ServerCollation +'</font></td>                                
+ <td align="Center" width="25%" height="27"><font face="Verdana" size="1">'+@LicenseType+'</font></td>  
+<td align="Center" width="93%" height="27"><font face="Verdana" size="1">'+@ISClustered +'</font></td>                                
+ </tr>'                             
+                
+  /***** Last Reboot Report ****/  
+ SELECT                                   
+ @TableHTML = @TableHTML +                                     
+ '</table>                                  
+ <p style="margin-top: 1; margin-bottom: 0">&nbsp;</p>                                  
+ <font face="Verdana" size="4" color="#3399ff"><H3><bold>Instance last Rebooted</bold></H3></font>                                  
+ <table style="BORDER-COLLAPSE: collapse" borderColor="#111111" cellPadding="0" width="47%" 
+
+bgColor="#ffffff" borderColorLight="#000000" border="2">                                      
+ <tr>                                      
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Last ReBooted</font></th>                      
+
+                
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Current DateTime</font></th>                  
+
+                    
+ <th align="Center" width="50" bgColor="#000080">                                   
+ <font face="Verdana" size="1" color="#FFFFFF">UpTimeInDays</font></th>                       
+
+               
+  </tr>'                                  
+                                  
+SELECT                                   
+ @TableHTML =  @TableHTML +                                       
+ '<tr>                                    
+ <td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), LastRebooted ), '')  +'</font></td>' +                                        
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), CurrentDate ), '')  +'</font></td>' +                                   
+ '<td align="Center"><font face="Verdana" size="1" color="#40C211">' + ISNULL(CONVERT(VARCHAR(100), UpTimeInDays ), '')  +'</font></td>' +                                        
+  '</tr>'                                  
+FROM                                   
+ #RebootDetails   
+  
+
+
+   /***** SQL Service Account Details    ****/  
+ SELECT                                   
+ @TableHTML = @TableHTML +                                     
+ '</table>                                  
+ <p style="margin-top: 1; margin-bottom: 0">&nbsp;</p>                                  
+ <font face="Verdana" size="4" color="#3399ff"><H3><bold>SQL Server Service Accounts Details </bold></H3></font>                                  
+ <table style="BORDER-COLLAPSE: collapse" borderColor="#111111" cellPadding="0" width="47%" 
+
+bgColor="#ffffff" borderColorLight="#000000" border="2">                                      
+ <tr>                                      
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Servicename</font></th>                      
+
+                
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">startup_type</font></th>                  
+ 
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">status</font></th>  
+
+   <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Service_Account</font></th> 
+  </tr>'                                  
+                                  
+SELECT                                   
+ @TableHTML =  @TableHTML +                                       
+ '<tr>                                    
+ <td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), Servicename ), '')  +'</font></td>' +                                        
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), startup_type ), '')  +'</font></td>' +     
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), status ), '')  +'</font></td>' + 
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), Service_Account ), '')  +'</font></td>' + 
+  '</tr>'                                  
+FROM                                   
+ #Serviceaccount  
+
+/***** Authentication Mode Details ****/  
+
+ SELECT                                   
+ @TableHTML = @TableHTML +                                     
+ '</table>                                  
+ <p style="margin-top: 1; margin-bottom: 0">&nbsp;</p>                                  
+ <font face="Verdana" size="4" color="#3399ff"><H3><bold>SQL Server Authentication Mode Details </bold></H3></font>                                  
+ <table style="BORDER-COLLAPSE: collapse" borderColor="#111111" cellPadding="0" width="47%" 
+
+bgColor="#ffffff" borderColorLight="#000000" border="2">                                      
+ <tr>                                      
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Authentication Mode</font></th>                      
+  </tr>'                                  
+                                  
+SELECT                                   
+ @TableHTML =  @TableHTML +                                       
+ '<tr>                                    
+ <td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), [Authentication Mode] ), '')  +'</font></td>' +                                        
+  '</tr>'                                  
+FROM                                   
+ #Mode  
+
+ /************SQL Audit Trigger Details ********************/
+
+
+  SELECT                                   
+ @TableHTML = @TableHTML +                                     
+ '</table>                                  
+ <p style="margin-top: 1; margin-bottom: 0">&nbsp;</p>                                  
+ <font face="Verdana" size="4" color="#3399ff"><H3><bold>SQL Audit Trigger Details </bold></H3></font>                                  
+ <table style="BORDER-COLLAPSE: collapse" borderColor="#111111" cellPadding="0" width="47%" 
+
+bgColor="#ffffff" borderColorLight="#000000" border="2">                                      
+ <tr>                                      
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Trigger Name</font></th>                      
+
+                
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Status</font></th>                  
+ 
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Create Date</font></th>  
+
+   <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Modify Date</font></th> 
+  </tr>'                                  
+                                  
+SELECT                                   
+ @TableHTML =  @TableHTML +                                       
+ '<tr>                                    
+ <td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), TriggerName ), '')  +'</font></td>' +                                        
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), Status ), '')  +'</font></td>' +     
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), Create_Date ), '')  +'</font></td>' + 
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), Modify_Date ), '')  +'</font></td>' + 
+  '</tr>'                                  
+FROM                                   
+ #Trigger 
+
+/***** Backup Compression Details ****/  
+
+ SELECT                                   
+ @TableHTML = @TableHTML +                                     
+ '</table>                                  
+ <p style="margin-top: 1; margin-bottom: 0">&nbsp;</p>                                  
+ <font face="Verdana" size="4" color="#3399ff"><H3><bold>Backup Compression Details </bold></H3></font>                                  
+ <table style="BORDER-COLLAPSE: collapse" borderColor="#111111" cellPadding="0" width="47%" 
+
+bgColor="#ffffff" borderColorLight="#000000" border="2">                                      
+ <tr>                                      
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Configuration Name</font></th>                      
+             
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Description</font></th>                  
+
+   <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Status</font></th> 
+  </tr>'                                  
+                                  
+SELECT                                   
+ @TableHTML =  @TableHTML +                                       
+ '<tr>                                    
+ <td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), [Configuration Name] ), '')  +'</font></td>' +                                        
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), Description ), '')  +'</font></td>' +    case When Status='FALSE' 
+  THEN 
+  '<td align="Center"><font face="Verdana" size="1" color="#FF0000"><b>' + ISNULL(CONVERT(VARCHAR(100),  Status), '')  +'</font></td>' 
+ELSE 
+  '<td align="Center"><font face="Verdana" size="1" color="#40C211"><b>' + ISNULL(CONVERT(VARCHAR(100),  Status), '')  +'</font></td>'  
+END +
+  '</tr>'                                  
+FROM                                   
+ #Backup  
+
+
+
+/***** Free Disk Space Report ****/  
+SELECT                                   
+ @TableHTML =  @TableHTML +                              
+ '</table>                                  
+ <p style="margin-top: 1; margin-bottom: 0">&nbsp;</p>                                  
+ <font face="Verdana" size="4" color="#3399ff"><H3><bold>Disk Space Report</bold></H3></font> 
+<table id="AutoNumber1" style="BORDER-COLLAPSE: collapse" borderColor="#111111" height="40" cellSpacing="0" cellPadding="0" width="47%" border="2">                                  
+   <tr>                
+ <th align="Center" width="136" bgColor="#000080">                                    
+ <font face="Verdana" size="1" color="#FFFFFF">Drive_Name</font></th>                         
+
+     
+  <th align="Center" width="200" bgColor="#000080">               
+ <font face="Verdana" size="1" color="#FFFFFF">Free_Space_GB</font></th>              
+   </tr>'                                  
+SELECT      
+ @TableHTML =  @TableHTML +                                       
+ '<tr>                                    
+ <td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100),  DName ), '')  +'</font></td>' +CASE WHEN Free_GB < 30 
+ THEN 
+  '<td align="Center"><font face="Verdana" size="1" color="#FF0000"><b>' + ISNULL(CONVERT(VARCHAR(100),  Free_GB), '')  +'</font></td>' 
+ELSE 
+  '<td align="Center"><font face="Verdana" size="1" color="#40C211"><b>' + ISNULL(CONVERT(VARCHAR(100),  Free_GB), '')  +'</font></td>'  
+END +
+  '</tr>'                                  
+FROM             
+#FreeSpace
+
+ /***** SA Status Report ****/  
+ SELECT                                   
+ @TableHTML = @TableHTML +                                     
+ '</table>                                  
+ <p style="margin-top: 1; margin-bottom: 0">&nbsp;</p>                                  
+ <font face="Verdana" size="4" color="#3399ff"><H3><bold>SA Login Status</bold></H3></font>                                  
+ <table style="BORDER-COLLAPSE: collapse" borderColor="#111111" cellPadding="0" width="47%" 
+
+bgColor="#ffffff" borderColorLight="#000000" border="2">                                      
+ <tr>                                      
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Login Name</font></th>                      
+
+                
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Status</font></th>                  
+                                  
+  </tr>'                                  
+                                  
+SELECT                                   
+ @TableHTML =  @TableHTML +                                       
+ '<tr>                                    
+ <td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), Login ), '')  +'</font></td>' +  case When Status='Enabled' 
+  THEN 
+  '<td align="Center"><font face="Verdana" size="1" color="#FF0000"><b>' + ISNULL(CONVERT(VARCHAR(100),  Status), '')  +'</font></td>' 
+ELSE 
+  '<td align="Center"><font face="Verdana" size="1" color="#40C211"><b>' + ISNULL(CONVERT(VARCHAR(100),  Status), '')  +'</font></td>'  
+END +                                                                     
+  '</tr>'                                  
+FROM                                   
+ #SAStatus 
+
+
+  /***** SYS Configuration Report ****/  
+ SELECT                                   
+ @TableHTML = @TableHTML +                                     
+ '</table>                                  
+ <p style="margin-top: 1; margin-bottom: 0">&nbsp;</p>                                  
+ <font face="Verdana" size="4" color="#3399ff"><H3><bold>SYS Configuration Xpcmd & Adhoc Check </bold></H3></font>                                  
+ <table style="BORDER-COLLAPSE: collapse" borderColor="#111111" cellPadding="0" width="47%" 
+
+bgColor="#ffffff" borderColorLight="#000000" border="2">                                      
+ <tr>                                      
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Configuration Name</font></th>                      
+
+                
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Status</font></th>                  
+                                  
+  </tr>'                                  
+                                  
+SELECT                                   
+ @TableHTML =  @TableHTML +                                       
+ '<tr>                                    
+ <td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), [Configuration Name] ), '')  +'</font></td>' +  case When Status='Enabled' 
+  THEN 
+  '<td align="Center"><font face="Verdana" size="1" color="#FF0000"><b>' + ISNULL(CONVERT(VARCHAR(100),  Status), '')  +'</font></td>' 
+ELSE 
+  '<td align="Center"><font face="Verdana" size="1" color="#40C211"><b>' + ISNULL(CONVERT(VARCHAR(100),  Status), '')  +'</font></td>'  
+END +                                                                                                                                                                                    
+  '</tr>'                                  
+FROM                                   
+ #Configstatus 
+
+  /***** Memory and CPU Configuration Report ****/  
+ SELECT                                   
+ @TableHTML = @TableHTML +                                     
+ '</table>                                  
+ <p style="margin-top: 1; margin-bottom: 0">&nbsp;</p>                                  
+ <font face="Verdana" size="4" color="#3399ff"><H3><bold>Memory & CPU Count Check </bold></H3></font>                                  
+ <table style="BORDER-COLLAPSE: collapse" borderColor="#111111" cellPadding="0" width="47%" 
+
+bgColor="#ffffff" borderColorLight="#000000" border="2">                                      
+ <tr>                                      
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Total_Memory_in_GB</font></th>                      
+
+                
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">CPU_Count</font></th>                  
+                                  
+  </tr>'                                  
+                                  
+SELECT                                   
+ @TableHTML =  @TableHTML +                                       
+ '<tr>                                    
+ <td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), [Total_Memory_in_GB] ), '')  +'</font></td>' +                                        
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), CPU_Count ), '')  +'</font></td>' +                                                                           
+  '</tr>'                                  
+FROM                                   
+ #MemoryDetails  
+
+
+
+   /***** Server Min & Max Memory Configuration Details    ****/  
+ SELECT                                   
+ @TableHTML = @TableHTML +                                     
+ '</table>                                  
+ <p style="margin-top: 1; margin-bottom: 0">&nbsp;</p>                                  
+ <font face="Verdana" size="4" color="#3399ff"><H3><bold>Server Min & Max Memory Check </bold></H3></font>                                  
+ <table style="BORDER-COLLAPSE: collapse" borderColor="#111111" cellPadding="0" width="47%" 
+
+bgColor="#ffffff" borderColorLight="#000000" border="2">                                      
+ <tr>                                      
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Instance_Name</font></th>                      
+
+                
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Name</font></th>                  
+ 
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Value</font></th>  
+  </tr>'                                  
+                                  
+SELECT                                   
+ @TableHTML =  @TableHTML +                                       
+ '<tr>                                    
+ <td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), Instance_Name ), '')  +'</font></td>' +                                        
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), Name ), '')  +'</font></td>' +     
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), Value ), '')  +'</font></td>' +     
+  '</tr>'                                  
+FROM                                   
+ #ServerMemory  
+
+
+  /***** DB compatibility and DB Collation Details    ****/  
+ SELECT                                   
+ @TableHTML = @TableHTML +                                     
+ '</table>                                  
+ <p style="margin-top: 1; margin-bottom: 0">&nbsp;</p>                                  
+ <font face="Verdana" size="4" color="#3399ff"><H3><bold>DB Compatibility & Collation Check </bold></H3></font>                                  
+ <table style="BORDER-COLLAPSE: collapse" borderColor="#111111" cellPadding="0" width="80%" 
+
+bgColor="#ffffff" borderColorLight="#000000" border="2">                                      
+ <tr>                                      
+ <th align="Center" width="70" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">SQL_Version</font></th>                      
+
+                
+ <th align="Center" width="40" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">DB_Name</font></th>  
+  
+   <th align="Center" width="30" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">compatibility_level</font></th> 
+ 
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">DB_Collation_Name</font></th>  
+  </tr>'                                  
+                                  
+SELECT                                   
+ @TableHTML =  @TableHTML +                                       
+ '<tr>                                    
+ <td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), SQL_Version ), '')  +'</font></td>' +                                        
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), DB_Name ), '')  +'</font></td>' +     
+ 
+ '</font></td>' +CASE WHEN SUBSTRING(convert(nvarchar(100),compatibility_level),1,2) = @compatable1
+ THEN 
+  '<td align="Center"><font face="Verdana" size="1" color="#40C211"><b>' + ISNULL(CONVERT(VARCHAR(100),  compatibility_level), '')  +'</font></td>' 
+ELSE 
+  '<td align="Center"><font face="Verdana" size="1" color="#FF0000"><b>' + ISNULL(CONVERT(VARCHAR(100),  compatibility_level), '')  +'</font></td>'  
+END +
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), DB_Collation_Name ), '')  +'</font></td>' +  
+  '</tr>'                                  
+FROM                                   
+ #Compatibility  
+
+   /***** Server Collation Details    ****/  
+ SELECT                                   
+ @TableHTML = @TableHTML +                                     
+ '</table>                                  
+ <p style="margin-top: 1; margin-bottom: 0">&nbsp;</p>                                  
+ <font face="Verdana" size="4" color="#3399ff"><H3><bold>SQL Instance Collation Check </bold></H3></font>                                  
+ <table style="BORDER-COLLAPSE: collapse" borderColor="#111111" cellPadding="0" width="47%" 
+
+bgColor="#ffffff" borderColorLight="#000000" border="2">                                      
+ <tr>                                      
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">SQL_Instance_Collation</font></th>                      
+
+  </tr>'                                  
+                                  
+SELECT                                   
+ @TableHTML =  @TableHTML +                                       
+ '<tr>                                    
+ <td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), Server_Collation ), '')  +'</font></td>' +         
+  '</tr>'                                  
+FROM                                   
+ #Collation  
+
+
+
+   /***** Database Owner without SA Details    ****/  
+ SELECT                                   
+ @TableHTML = @TableHTML +                                     
+ '</table>                                  
+ <p style="margin-top: 1; margin-bottom: 0">&nbsp;</p>                                  
+ <font face="Verdana" size="4" color="#3399ff"><H3><bold>Database Owner without SA Check </bold></H3></font>                                  
+ <table style="BORDER-COLLAPSE: collapse" borderColor="#111111" cellPadding="0" width="47%" 
+
+bgColor="#ffffff" borderColorLight="#000000" border="2">                                      
+ <tr>                                      
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">DB_Name</font></th>                      
+
+  
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Associated_DBOwner</font></th>    
+  </tr>'                                  
+                                  
+SELECT                                   
+ @TableHTML =  @TableHTML +                                       
+ '<tr>                                    
+ <td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), DB_Name ), '')  +'</font></td>' +  
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), Associated_DBOwner ), '')  +'</font></td>' + 
+  '</tr>'                                  
+FROM                                   
+ #DBowner  
+
+
+    /***** Non-DBA and Non-Service Accounts Logins with Admin Access Details    ****/  
+ SELECT                                   
+ @TableHTML = @TableHTML +                                     
+ '</table>                                  
+ <p style="margin-top: 1; margin-bottom: 0">&nbsp;</p>                                  
+ <font face="Verdana" size="4" color="#3399ff"><H3><bold>Non-DBA and Non-Service Accounts Logins with Admin Access Check </bold></H3></font>                                  
+ <table style="BORDER-COLLAPSE: collapse" borderColor="#111111" cellPadding="0" width="47%" 
+
+bgColor="#ffffff" borderColorLight="#000000" border="2">                                      
+ <tr>                                      
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Login_Name</font></th>                      
+
+  
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">SA_Rights</font></th>    
+  </tr>'                                  
+                                  
+SELECT                                   
+ @TableHTML =  @TableHTML +                                       
+ '<tr>                                    
+ <td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), Login_Name  ), '')  +'</font></td>' +  
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), SA_Rights  ), '')  +'</font></td>' + 
+  '</tr>'                                  
+FROM                                   
+ #Logins_Admin_Rights
+
+
+  /*****  Individual Windows Logins In server Details    ****/  
+ SELECT                                   
+ @TableHTML = @TableHTML +                                     
+ '</table>                                  
+ <p style="margin-top: 1; margin-bottom: 0">&nbsp;</p>                                  
+ <font face="Verdana" size="4" color="#3399ff"><H3><bold> Individual Windows Logins In server Details </bold></H3></font>                                  
+ <table style="BORDER-COLLAPSE: collapse" borderColor="#111111" cellPadding="0" width="47%" 
+
+bgColor="#ffffff" borderColorLight="#000000" border="2">                                      
+ <tr>                                      
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Login_Name</font></th>                      
+
+  </tr>'                                  
+                                  
+SELECT                                   
+ @TableHTML =  @TableHTML +                                       
+ '<tr>                                    
+ <td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), Login_Name  ), '')  +'</font></td>' +         
+  '</tr>'                                  
+FROM                                   
+ #Individual_win_login      
+
+ -------------------------SQL Mirroring Endpoint Authorization Details----------------------------------------------------
+
+ SELECT                                   
+ @TableHTML = @TableHTML +                                     
+ '</table>                                  
+ <p style="margin-top: 1; margin-bottom: 0">&nbsp;</p>                                  
+ <font face="Verdana" size="4" color="#3399ff"><H3><bold>SQL Mirroring Endpoint Authorization Details </bold></H3></font>                                  
+ <table style="BORDER-COLLAPSE: collapse" borderColor="#111111" cellPadding="0" width="47%" 
+
+bgColor="#ffffff" borderColorLight="#000000" border="2">                                      
+ <tr>                                      
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Principal Name</font></th>                      
+
+                
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">EndPoint Name</font></th>                  
+ 
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Protocol Name</font></th>  
+
+   <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Status</font></th> 
+  </tr>'                                  
+                                  
+SELECT                                   
+ @TableHTML =  @TableHTML +                                       
+ '<tr>                                    
+ <td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), [Principal Name] ), '')  +'</font></td>' +                                        
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), [EndPoint Name] ), '')  +'</font></td>' +     
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), [Protocol Name] ), '')  +'</font></td>' + 
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), Status ), '')  +'</font></td>' + 
+  '</tr>'                                  
+FROM                                   
+ #Mirror
+
+ /*****  Replication DB List Details   ****/  
+ SELECT                                   
+ @TableHTML = @TableHTML +                                     
+ '</table>                                  
+ <p style="margin-top: 1; margin-bottom: 0">&nbsp;</p>                                  
+ <font face="Verdana" size="4" color="#3399ff"><H3><bold> Replication DB List Details </bold></H3></font>                                  
+ <table style="BORDER-COLLAPSE: collapse" borderColor="#111111" cellPadding="0" width="47%" 
+
+bgColor="#ffffff" borderColorLight="#000000" border="2">                                      
+ <tr>                                      
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Database_Name </font></th>                      
+
+  </tr>'                                  
+                                  
+SELECT                                   
+ @TableHTML =  @TableHTML +                                       
+ '<tr>                                    
+ <td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), DB_Name  ), '')  +'</font></td>' +         
+  '</tr>'                                  
+FROM                                   
+ #Replication_DB         
+
+
+ 
+ /*****  Replication Job Details   ****/  
+ SELECT                                   
+ @TableHTML = @TableHTML +                                     
+ '</table>                                  
+ <p style="margin-top: 1; margin-bottom: 0">&nbsp;</p>                                  
+ <font face="Verdana" size="4" color="#3399ff"><H3><bold> Replication Job Details </bold></H3></font>                                  
+ <table style="BORDER-COLLAPSE: collapse" borderColor="#111111" cellPadding="0" width="47%" 
+
+bgColor="#ffffff" borderColorLight="#000000" border="2">                                      
+ <tr>                                      
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Job_Name </font></th>                      
+
+   <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Job_Owner </font></th>  
+
+  </tr>'                                  
+                                  
+SELECT                                   
+ @TableHTML =  @TableHTML +                                       
+ '<tr>                                    
+ <td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), Job_Name  ), '')  +'</font></td>' +    
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), Job_Owner  ), '')  +'</font></td>' +    
+  '</tr>'                                  
+FROM                                   
+ #Replication_job         
+
+
+
+
+ /*****  SQL Job  with Non SA Logins Details   ****/  
+
+ SELECT                                   
+ @TableHTML = @TableHTML +                                     
+ '</table>                                  
+ <p style="margin-top: 1; margin-bottom: 0">&nbsp;</p>                                  
+ <font face="Verdana" size="4" color="#3399ff"><H3><bold>SQL Jobs with Non SA Logins Details </bold></H3></font>                                  
+ <table style="BORDER-COLLAPSE: collapse" borderColor="#111111" cellPadding="0" width="47%" 
+
+bgColor="#ffffff" borderColorLight="#000000" border="2">                                      
+ <tr>                                      
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Job Name</font></th>                      
+             
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Owner Name</font></th>                  
+
+  
+  </tr>'                                  
+                                  
+SELECT                                   
+ @TableHTML =  @TableHTML +                                       
+ '<tr>                                    
+ <td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), [Job Name] ), '')  +'</font></td>' +                                        
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), [Owner Name] ), '')  +'</font></td>' +     
+
+  '</tr>'                                  
+FROM                                   
+ #Jobname
+
+ /*******************DBA Related Jobs listed **************************************************/
+
+
+ SELECT                                   
+ @TableHTML = @TableHTML +                                     
+ '</table>                                  
+ <p style="margin-top: 1; margin-bottom: 0">&nbsp;</p>                                  
+ <font face="Verdana" size="4" color="#3399ff"><H3><bold>DBA Related Jobs list Details </bold></H3></font>                                  
+ <table style="BORDER-COLLAPSE: collapse" borderColor="#111111" cellPadding="0" width="80%" 
+
+bgColor="#ffffff" borderColorLight="#000000" border="2">                                      
+ <tr>                                      
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Job Name</font></th>                      
+
+                
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Date Created</font></th>                  
+ 
+ <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Last Run Date</font></th>  
+
+   <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Status</font></th> 
+   <th align="Center" width="50" bgColor="#000080">                                      
+  <font face="Verdana" size="1" color="#FFFFFF">Category Name</font></th> 
+
+  </tr>'                                  
+                                  
+SELECT                                   
+ @TableHTML =  @TableHTML +                                       
+ '<tr>                                    
+ <td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), [Job Name] ), '')  +'</font></td>' +                                        
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), [Date Created] ), '')  +'</font></td>' +     
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), [Last RunDate] ), '')  +'</font></td>' +  case When Enabled='DISABLED' 
+  THEN 
+  '<td align="Center"><font face="Verdana" size="1" color="#FF0000"><b>' + ISNULL(CONVERT(VARCHAR(100),  Enabled), '')  +'</font></td>' 
+ELSE 
+  '<td align="Center"><font face="Verdana" size="1" color="#40C211"><b>' + ISNULL(CONVERT(VARCHAR(100),  Enabled), '')  +'</font></td>'  
+END +                                                                                                                            
+ 
+  '<td align="Center"><font face="Verdana" size="1">' + ISNULL(CONVERT(VARCHAR(100), CATEGORY_NAME ), '')  +'</font></td>' + 
+  '</tr>'                                  
+FROM                                   
+ #DBAJobs order by [Job Name]
+
+
+/**** tempdb File Usage *****/  
+SELECT                                   
+ @TableHTML =  @TableHTML +                              
+ '</table>                                  
+ <p style="margin-top: 1; margin-bottom: 0">&nbsp;</p>                                  
+ <font face="Verdana" size="4" color="#3399ff"><H3><bold>tempdb File Usage</bold></H3></font> 
+
+                                 
+ <table id="AutoNumber1" style="BORDER-COLLAPSE: collapse" borderColor="#111111" height="50" 
+
+cellSpacing="0" cellPadding="0" width="933" border="2">                                  
+   <tr>                
+ <th align="Center" width="300" bgColor="#000080">                                    
+ <font face="Verdana" size="1" color="#FFFFFF">Database Name</font></th>               
+ <th align="Center" width="300" bgColor="#000080">                                    
+ <font face="Verdana" size="1" color="#FFFFFF">File Name</font></th>               
+ <th align="Center" width="250" bgColor="#000080">                                    
+ <font face="Verdana" size="1" color="#FFFFFF">Physical Name</font></th>               
+ <th align="Center" width="250" bgColor="#000080">                                
+ <font face="Verdana" size="1" color="#FFFFFF">FileSize MB</font></th>               
+ <th align="Center" width="200" bgColor="#000080">               
+ <font face="Verdana" size="1" color="#FFFFFF">Available MB</font></th> 
+  <th align="Center" width="300" bgColor="#000080">                                    
+ <font face="Verdana" size="1" color="#FFFFFF">AutoGrowth </font></th>               
+ <th align="Center" width="200" bgColor="#000080">                                    
+ <font face="Verdana" size="1" color="#FFFFFF">Percent_full </font></th> 
+    
+          
+   </tr>'                                  
+select                                   
+@TableHTML =  @TableHTML +                                     
+ '<tr>' +                                      
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(databasename, '') + '</font></td>' +                                      
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(filename, '') +'</font></td>' + 
+'<td align="Center"><font face="Verdana" size="1">' + ISNULL(physicalName, '') +'</font></td>' +                                      
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(filesizeMB, '') +'</font></td>' +                                  
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(availableSpaceMB, '') +'</font></td>'+
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(AutoGrow, '') + '</font></td>'   +  CASE WHEN CONVERT(DECIMAL(10,3),percentfull) >80.00 
+ THEN    
+'<td align="Center"><font face="Verdana" size="1" color="#FF0000"><b>' + ISNULL(percentfull, '') +'</b></font></td></tr>'                                               
+ ELSE  
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(percentfull, '') +'</font></td></tr>' END 
+                               
+from                                   
+ #tempdbfileusage       
+  
+  /**** System Data and Log File Usage *****/  
+SELECT                                   
+ @TableHTML =  @TableHTML +                              
+ '</table>                                  
+ <p style="margin-top: 1; margin-bottom: 0">&nbsp;</p>                                  
+ <font face="Verdana" size="4" color="#3399ff"><H3><bold>System Files Usage Details </bold></H3></font> 
+
+                                 
+ <table id="AutoNumber1" style="BORDER-COLLAPSE: collapse" borderColor="#111111" height="40" 
+
+cellSpacing="0" cellPadding="0" width="933" border="2">                                  
+   <tr>                
+ <th align="Center" width="300" bgColor="#000080">                                    
+ <font face="Verdana" size="1" color="#FFFFFF">Database Name</font></th>               
+ <th align="Center" width="300" bgColor="#000080">                                    
+ <font face="Verdana" size="1" color="#FFFFFF">File Name</font></th>               
+ <th align="Center" width="250" bgColor="#000080">                                    
+ <font face="Verdana" size="1" color="#FFFFFF">Physical Name</font></th>               
+ <th align="Center" width="250" bgColor="#000080">                                
+ <font face="Verdana" size="1" color="#FFFFFF">FileSize MB</font></th>               
+ <th align="Center" width="200" bgColor="#000080">               
+ <font face="Verdana" size="1" color="#FFFFFF">AutoGrowth</font></th>               
+             
+   </tr>'                                  
+select                                   
+@TableHTML =  @TableHTML +                                     
+ '<tr>' +                                      
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(databasename, '') + '</font></td>' +                                      
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(filename, '') +'</font></td>' + 
+'<td align="Center"><font face="Verdana" size="1">' + ISNULL(physicalName, '') +'</font></td>' +                                      
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(FILESIZE_MB, '') +'</font></td>' + 
+ '<td align="Center"><font face="Verdana" size="1">' + ISNULL(AutoGrow, '') +'</font></td>'                                
+from                                   
+ #systemfiledetails    
+
+
+ SELECT                                   
+ @TableHTML =  @TableHTML +                              
+ '</table>                                  
+   <td align="Center">                              
+ <font face="Verdana" size="4" color="#008000"><H3><bold>This is Auto Generated Server Report </bold></H3></font> </td>
+
+                                 
+ <table id="AutoNumber1" style="BORDER-COLLAPSE: collapse" borderColor="#111111" height="40" 
+
+cellSpacing="0" cellPadding="0" width="933" border="2">'
+
+
+
+
+   
+ /****** End to HTML Formatting  ***/    
+SELECT                              
+ @TableHTML =  @TableHTML +  '</table>' +                                  
+ '<p style="margin-top: 0; margin-bottom: 0">&nbsp;</p>                                  
+ <p>&nbsp;</p>'    
+        set nocount on
+DECLARE @DBMailProfile1 TABLE (ProfileID INT, ProfileName SYSNAME, [Description] NVARCHAR(4000))
+DECLARE @ProfileName1 SYSNAME
+DECLARE @count tinyint
+INSERT INTO @DBMailProfile1 (ProfileID, ProfileName, [Description])
+EXEC msdb.dbo.sysmail_help_profile_sp
+select @count=Count(*) from @DBMailProfile1
+if (@count=0)
+Print 'No DB Profile added on this '+ @@servername+'.So This Server cannot Send the HTML Checklist Report'
+Else
+begin
+DECLARE @DBMailProfile TABLE (ProfileID INT, ProfileName SYSNAME, [Description] NVARCHAR(4000))
+DECLARE @ProfileName SYSNAME
+INSERT INTO @DBMailProfile (ProfileID, ProfileName, [Description])
+EXEC msdb.dbo.sysmail_help_profile_sp @profile_id = 1
+SET @ProfileName = (SELECT ProfileName FROM @DBMailProfile)
+	EXEC msdb.dbo.sp_send_dbmail 
+		 @profile_name = @ProfileName,
+		 @recipients = 'jay.vajrala@corteva.com; krishna.pabolu@corteva.com',  
+		 @subject = @strSubject, 
+		 @body = @TableHTML, 
+		 @body_format = 'HTML';
+
+
+SELECT @TableHTML "HC_Report";  
+ end 
+DROP TABLE  #RebootDetails  
+DROP TABLE	#FreeSpace;
+DROP TABLE #SAStatus
+DROP TABLE #Configstatus 
+DROP TABLE #MemoryDetails
+DROP TABLE #ServerMemory
+DROP TABLE #Compatibility
+DROP TABLE #Collation
+DROP TABLE #DBowner
+DROP TABLE #Logins_Admin_Rights
+DROP TABLE #Individual_win_login
+DROP TABLE #Replication_DB
+DROP TABLE #Replication_job
+DROP TABLE #tempdbfileusage
+DROP TABLE #systemfiledetails
+Drop TABLE #Serviceaccount
+Drop TABLE #Mode
+Drop Table #Backup
+Drop Table #Jobname
+Drop Table #Mirror 
+Drop Table #DBAJobs
+Drop Table #Trigger
+  
+SET NOCOUNT OFF;  
+SET ARITHABORT OFF;  
+END  

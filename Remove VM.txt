@@ -1,0 +1,56 @@
+#Remove-AzSqlVM -ResourceGroupName 'enterprise-oer-dev' -Name 'phazd0091db01'
+
+
+$resourceGroup = "IO-DAS-ERP-DBAMANAGED-SOX-PROD" #resourceGroupname
+$vms = @("PHAZP0701DB11") #vmNamesHere
+
+foreach($VMName in $vms)
+{
+$VM = Get-AzVM -ResourceGroupName $resourceGroup -Name $VMName -Verbose
+$DataDisks = @($VM.StorageProfile.DataDisks.Name)
+$OSDisk = @($VM.StorageProfile.OSDisk.Name)
+$NICS = @($VM.NetworkProfile.NetworkInterfaces)
+$ManagedDisk = $VM.StorageProfile.OsDisk.ManagedDisk
+#DELETE Virtual Machine
+$VM | Remove-AzVM -Force -Confirm:$false
+#DELETE NIC
+$NICName = Split-Path $NICS.ID -Leaf
+$Nic = Get-AzNetworkInterface -ResourceGroupName $ResourceGroup -Name $NICName
+$Nic | Remove-AzNetworkInterface -Force
+ 
+if($ManagedDisk) {
+    #DELETE MANAGEDDISKS
+   ($OSDisk + $DataDisks) | where {$_} | ForEach-Object {
+        Get-AzDisk -ResourceGroupName $ResourceGroup -DiskName $_ | Remove-AzDisk -Force
+    }
+}
+else {
+    #DELETE DATA DISKS 
+    $saname = ($VM.StorageProfile.OsDisk.Vhd.Uri -split '\.' | Select -First 1) -split '//' |  Select -Last 1
+ 
+    $SA = Get-AzStorageAccount -ResourceGroupName $ResourceGroup -Name $saname
+    $VM.StorageProfile.DataDisks | foreach {
+        $disk = $_.Vhd.Uri | Split-Path -Leaf
+        Get-AzStorageContainer -Name vhds -Context $Sa.Context |
+        Get-AzStorageBlob -Blob  $disk |
+        Remove-AzStorageBlob  
+    }
+ 
+    #DELETE OS DISKS
+    $saname = ($VM.StorageProfile.OsDisk.Vhd.Uri -split '\.' | Select -First 1) -split '//' |  Select -Last 1
+    $disk = $VM.StorageProfile.OsDisk.Vhd.Uri | Split-Path -Leaf
+    $SA = Get-AzStorageAccount -ResourceGroupName $ResourceGroup -Name $saname
+    Get-AzStorageContainer -Name vhds -Context $Sa.Context |
+    Get-AzStorageBlob -Blob  $disk |
+    Remove-AzStorageBlob
+}
+
+}
+
+Remove-AzLoadBalancer -ResourceGroupName "IO-DAS-ERP-DBAMANAGED-SOX-PROD" -Name "phazp0701db05-ilb" -Force
+Remove-AzAvailabilitySet -ResourceGroupName "IO-DAS-ERP-DBAMANAGED-SOX-PROD" -Name "phazp0701db05-as" -Force
+Remove-AzStorageAccount -ResourceGroupName "IO-DAS-ERP-DBAMANAGED-SOX-PROD" -Name "phazp0701db05sa" -Force
+#Remove-AzVMSqlServerExtension -ResourceGroupName "enterprise-oer-dev" -VMName "phazd0091db01" -Name "SqlIaaSAgent"
+
+
+
