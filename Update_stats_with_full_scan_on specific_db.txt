@@ -1,0 +1,36 @@
+--simple catalog will also pull the records
+
+select +'UPDATE STATISTICS [dbo].['+ name +'] WITH FULLSCAN' from sys.objects where type='U'
+
+
+-----------------------------------------------------------------------------------
+
+
+if object_id('tempdb..#Tables') is not null drop table #Tables
+go
+
+select TABLE_SCHEMA,TABLE_NAME
+into #Tables
+from INFORMATION_SCHEMA.TABLES with(nolock)
+where TABLE_TYPE = 'BASE TABLE'
+order by TABLE_SCHEMA,TABLE_NAME
+
+declare @Schema sysname
+declare @Table sysname
+declare @SQL nvarchar(max)
+
+
+declare c cursor for select * from #Tables order by TABLE_SCHEMA,TABLE_NAME
+open c
+fetch next from c into @Schema,@Table
+
+while @@fetch_status = 0
+begin
+  set @SQL = 'UPDATE STATISTICS ['+@Schema+'].[' + @Table + '] WITH FULLSCAN'
+  print @SQL
+  exec sp_executesql @statement = @SQL
+  fetch next from c into @Schema,@Table
+ end
+
+ close c
+ deallocate c
