@@ -1,0 +1,3 @@
+ --TO change the DB Compatibility
+select +'ALTER DATABASE ['+name +'] SET COMPATIBILITY_LEVEL = 150' from sys.databases 
+where database_id>4 and name not in('Distribution') and state_desc='ONLINE'

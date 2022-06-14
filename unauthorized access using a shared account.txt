@@ -1,0 +1,37 @@
+declare @sql varchar(2048)
+
+if exists (
+select hostname, loginame, program_name from sys.sysprocesses
+where spid > 50
+and loginame in (select name from sys.syslogins where hasaccess = 1 and isntgroup = 0 and isntuser = 0)
+and program_name like '%Management Studio%'
+)
+begin
+select top(1) @sql = 'Alert unauthorized access using a shared account from ' + rtrim(hostname) + ' using login name: ' + 
+	rtrim(loginame) + ' with ' + rtrim(program_name) + ' on ' + cast(getdate() as varchar) from sys.sysprocesses
+where spid > 50
+and loginame in (select name from sys.syslogins where hasaccess = 1 and isntgroup = 0 and isntuser = 0)
+and program_name like '%Management Studio%'
+
+print @sql
+--exec xp_logevent 50052, @sql, error
+DECLARE @DBMailProfile TABLE (ProfileID INT, ProfileName SYSNAME, [Description] NVARCHAR(4000))
+DECLARE @ProfileName SYSNAME
+INSERT INTO @DBMailProfile (ProfileID, ProfileName, [Description])
+EXEC msdb.dbo.sysmail_help_profile_sp @profile_id = 1
+SET @ProfileName = (SELECT ProfileName FROM @DBMailProfile)
+--select @ProfileName
+
+DECLARE @Server VARCHAR(75),@Message VARCHAR(500),@Subj VARCHAR(100)
+SELECT @Server = @@SERVERNAME
+SELECT @Message = 'unauthorized access using a shared account on ' + @Server +'. Please Check Immediately'
+SELECT @Subj = 'Job Failure Notification from ' + @Server
+EXEC msdb.dbo.sp_send_dbmail
+                @profile_name = @ProfileName,
+                @recipients = 'XXXXXXXXX',
+                @body = @Message,
+                @subject = @Subj
+
+end
+
+

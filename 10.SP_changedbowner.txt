@@ -1,0 +1,2 @@
+select +'use ['+name +']'+char(10)+'go'+char(10)+'sp_changedbowner ''sa''' from sys.databases 
+where database_id>4 and name not in('Distribution') and state_desc='ONLINE'
