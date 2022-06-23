@@ -1,0 +1,55 @@
+
+
+select DB_NAME(database_id),* from sys.dm_db_index_usage_stats where database_id= db_id('PROaccessConnect')
+
+select * from sys.stats
+
+sp_helpdb 'PROaccess'
+
+select * from sys.fn_dblog
+
+USE FXF -- Specify Database Name
+SELECT
+[Transaction Name],
+[Description],
+[Operation],
+[Transaction ID],
+[Transaction SID],
+[Begin Time],
+[End Time]
+FROM fn_dblog(NULL, NULL)
+ORDER BY [Begin Time] desc
+
+USE [master]
+GO
+SELECT SUSER_SNAME(0x010500000000000515000000404E9687ADC72AADEA97F63924E40D00)
+
+select * from sys.columns
+
+
+SELECT OBJECT_NAME(object_id) AS [ObjectName]
+      ,[name] AS [StatisticName]
+      ,STATS_DATE([object_id], [stats_id]) AS [StatisticUpdateDate],*
+FROM sys.stats where OBJECT_NAME(object_id) not like 'sys%' 
+order by [StatisticUpdateDate] desc
+
+
+
+---------------------------------------------------------------------------------------------------
+-- To pull for all the users DBs
+
+declare @sql varchar(max)
+
+
+SELECT @sql = 'IF ''?'' NOT IN(''master'', ''model'', ''msdb'', ''tempdb'') BEGIN USE ? 
+SELECT db_name(db_id()) as DB_Name,OBJECT_NAME(object_id) AS [ObjectName]
+      ,[name] AS [StatisticName]
+      ,STATS_DATE([object_id], [stats_id]) AS [StatisticUpdateDate],*
+FROM sys.stats where OBJECT_NAME(object_id) not like ''sys%''
+and STATS_DATE([object_id], [stats_id]) is not null
+order by [StatisticUpdateDate] desc
+    End'
+
+
+EXEC sp_Msforeachdb @sql
+
